@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Health Check - Distributed Rate Limiter</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .status-healthy {
+            color: #2dd4bf; /* teal-400 */
+        }
+        .status-degraded {
+            color: #f87171; /* red-400 */
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div class="container mx-auto p-8">
+        <header class="text-center mb-12">
+            <a href="/" class="text-cyan-400 hover:text-cyan-300 transition">&larr; Back to Home</a>
+            <h1 class="text-5xl font-bold text-cyan-400 mt-4">Service Health</h1>
+            <p class="text-xl text-gray-400 mt-4">Real-time status of the rate limiter service and its dependencies.</p>
+        </header>
+
+        <div class="bg-gray-800 rounded-lg shadow-lg p-8 max-w-2xl mx-auto">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="bg-gray-700 p-6 rounded-lg text-center">
+                    <h3 class="text-lg font-semibold text-gray-400 mb-2">Overall Status</h3>
+                    <p id="status" class="text-4xl font-bold {{ 'status-healthy' if data.status == 'healthy' else 'status-degraded' }}">{{ data.status | capitalize }}</p>
+                </div>
+                <div class="bg-gray-700 p-6 rounded-lg text-center">
+                    <h3 class="text-lg font-semibold text-gray-400 mb-2">Redis Connection</h3>
+                    <p class="text-4xl font-bold {{ 'status-healthy' if data.redis_connected else 'status-degraded' }}">{{ 'Connected' if data.redis_connected else 'Failed' }}</p>
+                </div>
+            </div>
+            <div class="mt-8 border-t border-gray-700 pt-6">
+                <h3 class="text-2xl font-semibold mb-4 text-white">Configuration Details</h3>
+                <ul class="space-y-3 text-gray-300">
+                    <li class="flex justify-between"><span>Serving Instance:</span> <span class="font-mono bg-gray-700 px-2 py-1 rounded">{{ data.instance_id }}</span></li>
+                    <li class="flex justify-between"><span>Rate Limit Algorithm:</span> <span class="font-mono bg-gray-700 px-2 py-1 rounded">{{ data.algorithm }}</span></li>
+                    <li class="flex justify-between"><span>Limit per Window:</span> <span class="font-mono bg-gray-700 px-2 py-1 rounded">{{ data.limit }} requests</span></li>
+                    <li class="flex justify-between"><span>Time Window:</span> <span class="font-mono bg-gray-700 px-2 py-1 rounded">{{ data.window_seconds }} seconds</span></li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

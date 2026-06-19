@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Distributed Rate Limiter</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div class="container mx-auto p-8">
+        <header class="text-center mb-12">
+            <h1 class="text-5xl font-bold text-cyan-400">Distributed Rate Limiter</h1>
+            <p class="text-xl text-gray-400 mt-4">A demonstration of a distributed rate limiter using FastAPI, Redis, and Nginx.</p>
+        </header>
+
+        <div class="bg-gray-800 rounded-lg shadow-lg p-8 mb-8">
+            <h2 class="text-3xl font-semibold mb-6 text-white">API Endpoints</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div class="bg-gray-700 p-6 rounded-lg">
+                    <h3 class="text-xl font-bold mb-2 text-cyan-300">/ (Root)</h3>
+                    <p class="text-gray-300">This page, providing an overview of the service.</p>
+                </div>
+                <div class="bg-gray-700 p-6 rounded-lg">
+                    <h3 class="text-xl font-bold mb-2 text-cyan-300">/docs</h3>
+                    <p class="text-gray-300">Interactive API documentation (Swagger UI).</p>
+                    <a href="/docs" target="_blank" class="mt-4 inline-block text-cyan-400 hover:text-cyan-300 transition">Try it &rarr;</a>
+                </div>
+                <div class="bg-gray-700 p-6 rounded-lg">
+                    <h3 class="text-xl font-bold mb-2 text-cyan-300">/healthz</h3>
+                    <p class="text-gray-300">Health check for the service and its dependencies.</p>
+                    <a href="/healthz" target="_blank" class="mt-4 inline-block text-cyan-400 hover:text-cyan-300 transition">Check Status &rarr;</a>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-gray-800 rounded-lg shadow-lg p-8">
+            <h2 class="text-3xl font-semibold mb-6 text-white">Test the Rate Limiter</h2>
+            <div class="flex items-center space-x-4 mb-6">
+                <input type="text" id="clientIdInput" class="w-full bg-gray-700 text-white border border-gray-600 rounded-md px-4 py-2 focus:outline-none focus:ring-2 focus:ring-cyan-500" placeholder="Enter a Client ID (e.g., user123)">
+                <button id="sendRequestBtn" class="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-6 rounded-md transition">Send Request</button>
+            </div>
+            <div id="response-container" class="space-y-4"></div>
+        </div>
+    </div>
+
+    <script>
+        const clientIdInput = document.getElementById('clientIdInput');
+        const sendRequestBtn = document.getElementById('sendRequestBtn');
+        const responseContainer = document.getElementById('response-container');
+
+        sendRequestBtn.addEventListener('click', async () => {
+            const clientId = clientIdInput.value || 'anonymous';
+            try {
+                const response = await fetch(`/api/resource?client_id=${clientId}`);
+                const data = await response.json();
+                
+                const statusClass = response.ok ? 'bg-green-800 border-green-600' : 'bg-red-800 border-red-600';
+                const statusText = response.ok ? 'Success' : 'Error';
+                const textColor = response.ok ? 'text-green-300' : 'text-red-300';
+
+                const responseCard = `
+                    <div class="response-card ${statusClass} border rounded-lg p-4 animate-fade-in">
+                        <div class="flex justify-between items-center">
+                            <p class="font-bold ${textColor}">${statusText} (${response.status})</p>
+                            <p class="text-sm text-gray-400">Served by: ${data.served_by || 'N/A'}</p>
+                        </div>
+                        <pre class="bg-gray-900 rounded p-3 mt-2 text-sm text-gray-200 overflow-x-auto"><code>${JSON.stringify(data, null, 2)}</code></pre>
+                    </div>
+                `;
+                responseContainer.insertAdjacentHTML('afterbegin', responseCard);
+
+            } catch (error) {
+                const errorCard = `
+                    <div class="response-card bg-red-800 border border-red-600 rounded-lg p-4 animate-fade-in">
+                        <p class="font-bold text-red-300">Network Error</p>
+                        <pre class="bg-gray-900 rounded p-3 mt-2 text-sm text-gray-200"><code>${error}</code></pre>
+                    </div>
+                `;
+                responseContainer.insertAdjacentHTML('afterbegin', errorCard);
+            }
+        });
+
+        // Animation for new cards
+        const style = document.createElement('style');
+        style.innerHTML = `
+            @keyframes fade-in {
+                from { opacity: 0; transform: translateY(-10px); }
+                to { opacity: 1; transform: translateY(0); }
+            }
+            .animate-fade-in {
+                animation: fade-in 0.5s ease-out forwards;
+            }
+        `;
+        document.head.appendChild(style);
+    </script>
+</body>
+</html>
