@@ -26,6 +26,15 @@ from fastapi.templating import Jinja2Templates
 
 from app.algorithms_redis import AtomicFixedWindowLimiter, AtomicSlidingWindowLimiter
 
+from prometheus_client import generate_latest
+from fastapi.responses import Response
+
+from app.metrics import (
+    allowed_requests_total,
+    blocked_requests_total,
+    request_latency_seconds,
+)
+
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379")
 ALGO = os.environ.get("RATE_LIMIT_ALGO", "fixed_window")  # or "sliding_log"
 LIMIT = int(os.environ.get("RATE_LIMIT", "100"))
@@ -59,29 +68,42 @@ async def root(request: Request):
 
 
 @app.get("/api/resource")
-async def get_resource(client_id: str = Query(..., description="Identifies the caller")):
+async def get_resource(
+    client_id: str = Query(..., description="Identifies the caller")
+):
+    start_time = time.perf_counter()
+
     allowed = await limiter.allow(client_id)
+
+    request_latency_seconds.labels(instance=INSTANCE_ID).observe(
+        time.perf_counter() - start_time
+    )
+
     if not allowed:
+        blocked_requests_total.labels(
+            instance=INSTANCE_ID
+        ).inc()
         raise HTTPException(
             status_code=429,
             detail={
                 "error": "rate limit exceeded",
-                # Read from the limiter instance, not the module-level LIMIT
-                # global -- otherwise swapping in a differently-configured
-                # limiter (e.g. in tests) silently reports the wrong limit.
                 "limit": limiter.limit,
                 "window_seconds": limiter.window_seconds,
                 "algorithm": ALGO,
-                "served_by": INSTANCE_ID,  # prove which instance handled this
+                "served_by": INSTANCE_ID,
             },
         )
+
+    allowed_requests_total.labels(
+        instance=INSTANCE_ID
+    ).inc()
+
     return {
         "status": "ok",
         "client_id": client_id,
-        "served_by": INSTANCE_ID,  # this is how you'll prove load balancing + shared state works
+        "served_by": INSTANCE_ID,
         "served_at": time.time(),
     }
-
 
 @app.get("/healthz", response_class=HTMLResponse)
 async def healthz(request: Request):
@@ -104,3 +126,10 @@ async def healthz(request: Request):
         return JSONResponse(data)
     
     return templates.TemplateResponse("health.html", {"request": request, "data": data})
+
+@app.get("/metrics")
+async def metrics():
+    return Response(
+        generate_latest(),
+        media_type="text/plain"
+    )
