@@ -1,0 +1,59 @@
+version: "3.9"
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+
+  app1:
+    build: .
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - RATE_LIMIT_ALGO=fixed_window
+      - RATE_LIMIT=100
+      - RATE_LIMIT_WINDOW=60
+      - INSTANCE_ID=app1
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  app2:
+    build: .
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - RATE_LIMIT_ALGO=fixed_window
+      - RATE_LIMIT=100
+      - RATE_LIMIT_WINDOW=60
+      - INSTANCE_ID=app2
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  app3:
+    build: .
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - RATE_LIMIT_ALGO=fixed_window
+      - RATE_LIMIT=100
+      - RATE_LIMIT_WINDOW=60
+      - INSTANCE_ID=app3
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - app1
+      - app2
+      - app3
