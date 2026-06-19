@@ -1,8 +1,8 @@
 # Distributed Rate Limiter
 
-A production-inspired distributed rate limiting service built with FastAPI, Redis, Docker, and Nginx.
+A production-inspired distributed rate limiting service built with **FastAPI, Redis, Docker, Nginx, and Prometheus**.
 
-This project explores how large-scale systems enforce request limits consistently across multiple application instances. It demonstrates distributed state management, concurrency control, atomic operations using Redis Lua scripts, load balancing, and correctness verification under concurrent load.
+This project explores how large-scale systems enforce request limits consistently across multiple application instances. It demonstrates distributed state management, concurrency control, atomic operations using Redis Lua scripts, load balancing, observability, and correctness verification under concurrent load.
 
 ---
 
@@ -24,6 +24,14 @@ This project explores how large-scale systems enforce request limits consistentl
 * Stateless application servers
 * Health monitoring endpoints
 
+### Observability
+
+* Prometheus metrics collection
+* Request throughput monitoring
+* Request latency tracking
+* Allowed vs blocked request metrics
+* Per-instance traffic visibility
+
 ### Testing & Validation
 
 * Unit tests
@@ -37,27 +45,60 @@ This project explores how large-scale systems enforce request limits consistentl
 ## Architecture
 
 ```text
-                ┌─────────────┐
-                │    Nginx    │
-                │ Load Balancer
-                └──────┬──────┘
-                       │
-        ┌──────────────┼──────────────┐
-        │              │              │
-        ▼              ▼              ▼
-     FastAPI        FastAPI        FastAPI
-      App1           App2           App3
-        │              │              │
-        └──────────────┼──────────────┘
-                       │
-                       ▼
-                  Redis Server
-             (Shared Rate Limit State)
+                    ┌─────────────┐
+                    │    Nginx    │
+                    │ Load Balancer
+                    └──────┬──────┘
+                           │
+            ┌──────────────┼──────────────┐
+            │              │              │
+            ▼              ▼              ▼
+         FastAPI        FastAPI        FastAPI
+          App1           App2           App3
+            │              │              │
+            └──────────────┼──────────────┘
+                           │
+                           ▼
+                      Redis Server
+                 (Shared Rate Limit State)
+                           │
+                           ▼
+                      Prometheus
+                    (Metrics Store)
 ```
 
 Every application instance is stateless.
 
-All rate limiting data is stored in Redis, allowing consistent enforcement across multiple service instances.
+All rate limiting state is stored in Redis, enabling consistent enforcement across multiple service instances while supporting horizontal scaling.
+
+---
+
+## Observability with Prometheus
+
+The service exposes operational metrics through a dedicated `/metrics` endpoint using the Prometheus Python client.
+
+Tracked metrics include:
+
+* `allowed_requests_total`
+* `blocked_requests_total`
+* `request_latency_seconds`
+
+Example metrics:
+
+```text
+allowed_requests_total 100
+blocked_requests_total 400
+
+request_latency_seconds_count 500
+request_latency_seconds_sum 2.31
+```
+
+Prometheus continuously scrapes metrics from all FastAPI instances and enables monitoring of:
+
+* Throughput
+* Request latency
+* Rate-limit enforcement
+* Traffic distribution across instances
 
 ---
 
@@ -102,7 +143,8 @@ rate-limiter/
 │   ├── algorithms_memory.py
 │   ├── algorithms_redis.py
 │   ├── main_phase1.py
-│   └── main.py
+│   ├── main.py
+│   └── metrics.py
 │
 ├── load_test/
 │   ├── locustfile.py
@@ -120,6 +162,7 @@ rate-limiter/
 ├── Dockerfile
 ├── docker-compose.yml
 ├── nginx.conf
+├── prometheus.yml
 └── README.md
 ```
 
@@ -140,10 +183,13 @@ cd rate-limiter
 docker compose up --build
 ```
 
-Services:
+### Available Services
 
-* Nginx → http://localhost:8080
-* Redis → localhost:6379
+| Service     | URL                   |
+| ----------- | --------------------- |
+| Application | http://localhost:8080 |
+| Prometheus  | http://localhost:9090 |
+| Redis       | localhost:6379        |
 
 ---
 
@@ -183,7 +229,7 @@ GET /api/resource?client_id=user123
 GET /healthz
 ```
 
-Returns:
+Example response:
 
 ```json
 {
@@ -191,6 +237,22 @@ Returns:
   "instance_id": "app1",
   "redis_connected": true
 }
+```
+
+---
+
+## Metrics Endpoint
+
+```http
+GET /metrics
+```
+
+Example metrics:
+
+```text
+allowed_requests_total 100
+blocked_requests_total 400
+request_latency_seconds_count 500
 ```
 
 ---
@@ -208,13 +270,14 @@ python load_test/standalone_load_test.py \
   --expected-limit 100
 ```
 
-Example Result:
+Example result:
 
 ```text
 === Load test results ===
 
 Total requests: 500
 Throughput: 111.9 req/s
+Latency p95: 402.6 ms
 
 Allowed: 100
 Blocked: 400
@@ -222,7 +285,7 @@ Blocked: 400
 PASS: allowed requests never exceeded configured limit
 ```
 
-This verifies that the distributed system correctly enforces a global limit across multiple service instances.
+This verifies that the distributed system correctly enforces a global rate limit across multiple service instances.
 
 ---
 
@@ -238,40 +301,47 @@ This verifies that the distributed system correctly enforces a global limit acro
 * Performance Testing
 * System Reliability
 * Backend Architecture
+* Observability
+* Metrics Collection
+* Prometheus Monitoring
+
+---
+
+## Tech Stack
+
+### Backend
+
+* FastAPI
+* Python
+* Redis
+
+### Infrastructure
+
+* Docker
+* Docker Compose
+* Nginx
+
+### Observability
+
+* Prometheus
+
+### Testing
+
+* Pytest
+* Locust
+* AsyncIO
+* HTTPX
 
 ---
 
 ## Future Improvements
 
 * Token Bucket Algorithm
-* Prometheus Metrics
 * Grafana Dashboards
 * Kubernetes Deployment
 * Distributed Tracing
 * Adaptive Rate Limiting
-
----
-
-## Tech Stack
-
-**Backend**
-
-* FastAPI
-* Python
-* Redis
-
-**Infrastructure**
-
-* Docker
-* Docker Compose
-* Nginx
-
-**Testing**
-
-* Pytest
-* Locust
-* AsyncIO
-* HTTPX
+* Redis Cluster Support
 
 ---
 
@@ -282,3 +352,5 @@ This project highlights an important distributed systems principle:
 > Correctness is often harder than implementation.
 
 A rate limiter that works on a single machine can fail under concurrency or horizontal scaling. By moving shared state into Redis and using atomic Lua scripts, the service maintains correctness even when requests are processed by multiple application instances simultaneously.
+
+The project also demonstrates how observability is essential for operating distributed systems. Metrics collection through Prometheus provides visibility into throughput, latency, traffic distribution, and rate-limit behavior, enabling data-driven performance analysis and debugging.
