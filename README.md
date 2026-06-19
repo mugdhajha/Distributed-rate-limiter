@@ -1,137 +1,284 @@
 # Distributed Rate Limiter
 
-A rate limiter that works correctly when multiple backend instances run
-simultaneously, all sharing limit state through Redis, with race
-conditions handled via atomic Lua scripts. Built in 5 phases so the
-*algorithm* and the *distributed-systems problem* are learned separately
-before being combined.
+A production-inspired distributed rate limiting service built with FastAPI, Redis, Docker, and Nginx.
+
+This project explores how large-scale systems enforce request limits consistently across multiple application instances. It demonstrates distributed state management, concurrency control, atomic operations using Redis Lua scripts, load balancing, and correctness verification under concurrent load.
+
+---
+
+## Features
+
+### Rate Limiting Algorithms
+
+* Fixed Window Counter
+* Sliding Window Log
+* Redis-backed distributed state
+* Atomic Redis Lua Script implementation
+* Demonstration of naive vs race-free implementations
+
+### Distributed Architecture
+
+* Multiple FastAPI service instances
+* Nginx load balancer
+* Shared Redis datastore
+* Stateless application servers
+* Health monitoring endpoints
+
+### Testing & Validation
+
+* Unit tests
+* Integration tests
+* Race condition verification
+* Concurrent load testing
+* Distributed correctness validation
+
+---
 
 ## Architecture
 
-```
-                    ┌─────────────┐
-   clients ──────▶  │ nginx (LB)  │  round-robin
-                    └──────┬──────┘
-                           │
-            ┌──────────────┼──────────────┐
-            ▼              ▼              ▼
-      ┌──────────┐   ┌──────────┐   ┌──────────┐
-      │ FastAPI  │   │ FastAPI  │   │ FastAPI  │   3 identical,
-      │ app1     │   │ app2     │   │ app3     │   stateless instances
-      └─────┬────┘   └─────┬────┘   └─────┬────┘
-            │              │              │
-            └──────────────┼──────────────┘
-                           ▼
-                     ┌──────────┐
-                     │  Redis   │   shared rate-limit state
-                     └──────────┘
-```
-
-## Project layout
-
-```
-app/
-  algorithms_memory.py   # Phase 1: in-memory fixed-window + sliding-log
-  algorithms_redis.py    # Phase 2 & 4: Redis versions, naive AND atomic
-  main_phase1.py          # Phase 1 standalone FastAPI app
-  main.py                 # Phase 3/4 production app (Redis-backed, multi-instance ready)
-tests/
-  test_phase1.py             # unit tests for in-memory algorithms
-  test_race_condition.py     # PROVES the naive version overcounts, atomic version doesn't
-  test_app_integration.py    # full HTTP-layer tests against the real app
-load_test/
-  locustfile.py               # Phase 5: locust-based load test
-  standalone_load_test.py     # Phase 5: no-UI async load + correctness check
-docker-compose.yml      # 3 app instances + redis + nginx
-Dockerfile
-nginx.conf
+```text
+                ┌─────────────┐
+                │    Nginx    │
+                │ Load Balancer
+                └──────┬──────┘
+                       │
+        ┌──────────────┼──────────────┐
+        │              │              │
+        ▼              ▼              ▼
+     FastAPI        FastAPI        FastAPI
+      App1           App2           App3
+        │              │              │
+        └──────────────┼──────────────┘
+                       │
+                       ▼
+                  Redis Server
+             (Shared Rate Limit State)
 ```
 
-## Running it
+Every application instance is stateless.
 
-### Quick local test (no Docker, single instance, in-memory only)
+All rate limiting data is stored in Redis, allowing consistent enforcement across multiple service instances.
+
+---
+
+## Why Redis Lua Scripts?
+
+A naive implementation often performs:
+
+```python
+count = redis.get(key)
+
+if count < limit:
+    redis.incr(key)
+```
+
+This introduces a race condition:
+
+1. Request A reads count = 99
+2. Request B reads count = 99
+3. Both requests decide to allow
+4. Both increment
+
+Result:
+
+```text
+Allowed Requests > Configured Limit
+```
+
+To eliminate this issue, the project uses Redis Lua scripts.
+
+Redis executes Lua scripts atomically, ensuring no other command can interleave between operations.
+
+This guarantees correctness even under high concurrency and across multiple application instances.
+
+---
+
+## Project Structure
+
+```text
+rate-limiter/
+│
+├── app/
+│   ├── algorithms_memory.py
+│   ├── algorithms_redis.py
+│   ├── main_phase1.py
+│   └── main.py
+│
+├── load_test/
+│   ├── locustfile.py
+│   └── standalone_load_test.py
+│
+├── templates/
+│   ├── index.html
+│   └── health.html
+│
+├── tests/
+│   ├── test_phase1.py
+│   ├── test_race_condition.py
+│   └── test_app_integration.py
+│
+├── Dockerfile
+├── docker-compose.yml
+├── nginx.conf
+└── README.md
+```
+
+---
+
+## Running the Project
+
+### Clone Repository
 
 ```bash
-pip install -r requirements.txt
-RATE_LIMIT=10 RATE_LIMIT_WINDOW=10 uvicorn app.main_phase1:app --port 8000
-curl "http://localhost:8000/api/resource?client_id=alice"
+git clone <repo-url>
+cd rate-limiter
 ```
 
-### Full distributed system (needs Docker + Docker Compose)
+### Start Services
 
 ```bash
-docker-compose up --build
-# nginx is now load-balancing across app1, app2, app3, all sharing one Redis,
-# exposed at http://localhost:8080
-
-curl "http://localhost:8080/api/resource?client_id=alice"
-# Response includes "served_by": "app1" / "app2" / "app3" -- hit it
-# repeatedly and watch it round-robin while still respecting ONE shared limit.
+docker compose up --build
 ```
 
-### Run the test suite
+Services:
+
+* Nginx → http://localhost:8080
+* Redis → localhost:6379
+
+---
+
+## API Usage
+
+### Request
+
+```http
+GET /api/resource?client_id=user123
+```
+
+### Successful Response
+
+```json
+{
+  "status": "ok",
+  "client_id": "user123",
+  "served_by": "app1"
+}
+```
+
+### Rate Limited Response
+
+```json
+{
+  "error": "rate limit exceeded",
+  "limit": 100,
+  "window_seconds": 60
+}
+```
+
+---
+
+## Health Monitoring
+
+```http
+GET /healthz
+```
+
+Returns:
+
+```json
+{
+  "status": "healthy",
+  "instance_id": "app1",
+  "redis_connected": true
+}
+```
+
+---
+
+## Load Testing
+
+Run concurrent load tests:
 
 ```bash
-pip install -r requirements-dev.txt
-pytest tests/ -v
+python load_test/standalone_load_test.py \
+  --url http://localhost:8080 \
+  --client-id benchmark \
+  --requests 500 \
+  --concurrency 50 \
+  --expected-limit 100
 ```
 
-`fakeredis[lua]` is used so the test suite (including the race-condition
-proof) runs without needing a real Redis server -- useful for CI. Swap in
-`redis.asyncio` pointed at a real host to run the identical tests against
-real Redis.
+Example Result:
 
-### Run the load test (against the real distributed system)
+```text
+=== Load test results ===
 
-```bash
-docker-compose up --build -d
+Total requests: 500
+Throughput: 111.9 req/s
 
-# Locust, with web UI:
-locust -f load_test/locustfile.py --host http://localhost:8080
-# open http://localhost:8089
+Allowed: 100
+Blocked: 400
 
-# Or headless, single command, gives you the resume numbers directly:
-locust -f load_test/locustfile.py --host http://localhost:8080 \
-    --headless -u 200 -r 50 --run-time 60s --csv=load_test/results
-
-# Or the standalone script (also verifies correctness, not just speed):
-python load_test/standalone_load_test.py --url http://localhost:8080 \
-    --client-id correctness-check --requests 1000 --concurrency 100 \
-    --expected-limit 100
+PASS: allowed requests never exceeded configured limit
 ```
 
-The `--expected-limit` flag is the actual point: it asserts the number of
-`200`s returned never exceeds your configured `RATE_LIMIT`, even though
-the requests were load-balanced across 3 separate processes. That's the
-proof the distributed coordination works.
+This verifies that the distributed system correctly enforces a global limit across multiple service instances.
 
-## The bug -> fix narrative (the interview story)
+---
 
-1. **Naive version** (`NaiveFixedWindowLimiter` / `NaiveSlidingWindowLimiter`
-   in `algorithms_redis.py`): reads the current count from Redis, checks
-   it against the limit, then writes the increment -- two separate
-   network round trips with a race window in between.
-2. **The bug**: under concurrent requests, multiple requests can all read
-   the same stale count before any of them writes their increment back.
-   Each one independently decides "I'm under the limit" and gets allowed
-   -- `test_race_condition.py::test_naive_fixed_window_overcounts_under_concurrency_real_io`
-   demonstrates this directly: with a limit of 10, 50 concurrent requests
-   were ALL allowed through.
-3. **The fix**: `AtomicFixedWindowLimiter` / `AtomicSlidingWindowLimiter`
-   collapse the read-check-write sequence into a single Redis Lua script.
-   Redis executes Lua scripts atomically -- no other command from any
-   client or instance can interleave with it. This is the same mechanism
-   as `MULTI`/`EXEC` transactions, but a single round trip and easier to
-   reason about for compound logic like ours.
-4. **The proof**: the same concurrent-load test against the atomic
-   version enforces the limit exactly, every time.
+## Key Concepts Demonstrated
 
-## What each phase taught (matches the original build plan)
+* Distributed Systems
+* Concurrency Control
+* Race Conditions
+* Atomic Operations
+* Redis Lua Scripting
+* Horizontal Scaling
+* Load Balancing
+* Performance Testing
+* System Reliability
+* Backend Architecture
 
-| Phase | What it adds | Key file |
-|---|---|---|
-| 1 | Both algorithms, in-memory, single instance | `algorithms_memory.py` |
-| 2 | Move state to Redis (still racy on purpose) | `algorithms_redis.py` (Naive* classes) |
-| 3 | Go distributed: 3 instances + nginx + shared Redis | `docker-compose.yml`, `main.py` |
-| 4 | Fix the race with atomic Lua scripts | `algorithms_redis.py` (Atomic* classes) |
-| 5 | Load test + correctness proof under concurrency | `load_test/` |
+---
+
+## Future Improvements
+
+* Token Bucket Algorithm
+* Prometheus Metrics
+* Grafana Dashboards
+* Kubernetes Deployment
+* Distributed Tracing
+* Adaptive Rate Limiting
+
+---
+
+## Tech Stack
+
+**Backend**
+
+* FastAPI
+* Python
+* Redis
+
+**Infrastructure**
+
+* Docker
+* Docker Compose
+* Nginx
+
+**Testing**
+
+* Pytest
+* Locust
+* AsyncIO
+* HTTPX
+
+---
+
+## Lessons Learned
+
+This project highlights an important distributed systems principle:
+
+> Correctness is often harder than implementation.
+
+A rate limiter that works on a single machine can fail under concurrency or horizontal scaling. By moving shared state into Redis and using atomic Lua scripts, the service maintains correctness even when requests are processed by multiple application instances simultaneously.
