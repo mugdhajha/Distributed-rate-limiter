@@ -287,6 +287,16 @@ PASS: allowed requests never exceeded configured limit
 
 This verifies that the distributed system correctly enforces a global rate limit across multiple service instances.
 
+Example 2:
+
+Load Test Results
+
+• 10,000 requests processed
+• 357.3 req/s throughput
+• P50 latency: 250 ms
+• P95 latency: 285 ms
+• P99 latency: 322 ms
+
 ---
 
 ## Key Concepts Demonstrated
